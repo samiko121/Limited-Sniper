@@ -1,0 +1,7 @@
+# One proxy per line. Copy this file to proxies.txt and set Proxies.Enabled to true.
+# Supported formats:
+#   host:port
+#   host:port:username:password
+#   username:password@host:port
+#   http://username:password@host:port
+#   socks5://username:password@host:port

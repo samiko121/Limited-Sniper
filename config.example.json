@@ -1,0 +1,68 @@
+{
+    "Cookies": {
+        "Buy_cookie": "",
+        "Check_cookies": [],
+        "Use_buy_cookie_for_checks": false,
+        "Refresh_on_start": false
+    },
+    "Items": {
+        "15181542808": 1,
+        "13335138883": {"max_price": 5, "buy_limit": 2}
+    },
+    "Global_buy_limit": {
+        "Enabled": false,
+        "Limit": 3
+    },
+    "Safety": {
+        "Dry_run": true,
+        "Max_price_per_purchase": 0,
+        "Daily_spend_limit": 0,
+        "Keep_robux_reserve": 0
+    },
+    "Watchers": {
+        "Marketplace_batch": true,
+        "Catalog_batch": true,
+        "Economy_single": true,
+        "Workers_per_watcher": 2,
+        "Marketplace_batch_size": 30,
+        "Catalog_batch_size": 120,
+        "Requests_per_second_per_lane": 6
+    },
+    "Proxies": {
+        "Enabled": false,
+        "File": "proxies.txt",
+        "Proxies_only": false,
+        "Send_check_cookie": false,
+        "Max_failures": 5,
+        "Tor": {
+            "Enabled": false,
+            "Path": "",
+            "Instances": 10,
+            "Start_port": 9080
+        }
+    },
+    "Webhook": {
+        "Enabled": false,
+        "Url": "",
+        "Send_fails": false,
+        "UserID_To_Ping": 0
+    },
+    "Discord": {
+        "Enabled": false,
+        "Token": "",
+        "Owner_ids": [],
+        "Startup_message": false,
+        "Prefix": {
+            "Enabled": false,
+            "Prefix": "!"
+        }
+    },
+    "Console": {
+        "Dashboard": true
+    },
+    "Auto_restart": {
+        "Enabled": false,
+        "Minutes": 60
+    },
+    "Update_check": false
+}

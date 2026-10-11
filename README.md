@@ -1,116 +1,171 @@
 # Limited Sniper
-### Next update at 50 ⭐
-Limited Sniper let you add limited ids in config.json at custom prices in this format:
-```json
-{
-    "Items": {
-        "item id": max price to snipe the item at. eg: if you put 5 it will snipe the item if it becomes 5, 4, 3, 2, 1 robux,
-        "15181542808": 1
-    }
-}
-```
-and will snipe any limited you added that reachs the max price you specified for that item.
 
-*you can add multiple IDs at the same time by adding a comma at the end of each ID*
-## Setup
-```json
-{
-    "Webhook": {
-        "Enabled": false, If true will send a notification to the webhook url you added
-        "Send_Fails": false, If true will send a webhook notification when it fails to snipe an item with a reason
-        "UserID_To_Ping": 0, Discord user id you want to ping on successful snipes, Keep it at 0 to not ping
-        "Url": "" If you set enabled to true you have to add a webhook url here
-    },
+Snipes Roblox UGC limiteds (new stock **and** resale listings, including classic
+limiteds) at or below the max price you set per item.
 
+**v2 is a full rewrite**: plain readable Python, no obfuscation, no telemetry,
+no bundled executables. The program only talks to:
+
+| Host | Why |
+|---|---|
+| `*.roblox.com` | checking items and buying them |
+| your Discord webhook / bot | only if you enable them |
+| your own proxies / your own Tor | only if you enable them |
+| `raw.githubusercontent.com/samiko121/Limited-Sniper` | only if `Update_check` is `true` |
+
+A test (`tests/test_misc.py`) fails if any other host shows up in the code.
+
+> Automated buying is against Roblox's Terms of Use. Any sniper can get an
+> account banned. Use alt accounts for checking and start with `Dry_run`.
+
+## Quick start
+
+1. Install **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/) (tick "Add to PATH").
+2. Double-click `start.bat` (Windows) or run `./start.sh` (Linux/macOS).
+   The first run creates a private virtual environment, installs the pinned
+   dependencies (verified by hash) and creates `config.json`.
+3. Put your cookie and items into `config.json` (see below) and start again.
+4. Optional: `start.bat selftest` checks your cookies and the Roblox endpoints without buying.
+5. The example config starts in **dry run** (nothing is bought). Set
+   `"Dry_run": false` when the log shows it would buy what you expect.
+
+`config.json`, `proxies.txt`, `data/` and `logs/` are git-ignored, so your
+secrets are never committed and `git pull` updates never overwrite them.
+Config files from v1.x are migrated automatically.
+
+## config.json
+
+```jsonc
+{
     "Cookies": {
-        "Buy_cookie": "", Your roblox account cookie that will buy the limiteds (main account cookie)
-        "Check_cookie": "", Your roblox alt account cookie that will check the limiteds (can be the same as buy cookie)
-        "Bypass_cookies": false Bypass roblox's region lock (optional)
+        "Buy_cookie": "",                 // account that buys (see "Keeping cookies safe")
+        "Check_cookies": [],              // optional alt accounts used only for checking
+        "Use_buy_cookie_for_checks": false, // false = check anonymously when no alts are set
+        "Refresh_on_start": false         // old "Bypass_cookies": re-issue the cookie for this IP/region
     },
-
-    "Global_buy_limit": {
-        "Enabled": false, Enabke/Disable global buy limit
-        "Limit": 3 If you made enabled to true set a limit for the sniper to stop sniping an item that hits the specific limit aka amount of copies you own of that item
-    },
-
     "Items": {
-        "15181542808": 1, Limited ids with max price
-        "13335138883": 1
+        "15181542808": 1,                               // item id: max price
+        "13335138883": {"max_price": 5, "buy_limit": 2} // with its own buy limit
     },
-
-    "Auto-Restart":{
-        "Enabled": false, If true will auto restart every X seconds
-        "Seconds": 120 If you enabled auto restart it will restart every 120 seconds (2 minutes), change this for your need
+    "Global_buy_limit": {"Enabled": false, "Limit": 3}, // max copies to own per item
+    "Safety": {
+        "Dry_run": true,                  // log/notify only, never buy
+        "Max_price_per_purchase": 0,      // hard cap per purchase, 0 = off (protects against typos)
+        "Daily_spend_limit": 0,           // max Robux per day, 0 = off
+        "Keep_robux_reserve": 0           // never go below this balance
     },
-
-    "Proxies":{
-        "Enabled": false, If true will use Tor's proxies 
-        "Amount": 20, Will load 20 tor proxies for the sniper to use, change this for your need
-        "Max_Threads": 100 If your sniper is lagging while using a big amount of proxies reduce this, put this to a big amount for the sniper to load the very max amount of threads
+    "Watchers": {
+        "Marketplace_batch": true,        // apis.roblox.com, includes listing ids (fastest path to a buy)
+        "Catalog_batch": true,            // catalog.roblox.com, 120 items per request
+        "Economy_single": true,           // economy.roblox.com, one item per request, most detail
+        "Workers_per_watcher": 2,
+        "Marketplace_batch_size": 30,
+        "Catalog_batch_size": 120,
+        "Requests_per_second_per_lane": 6 // starting speed; slows down automatically on 429
     },
-
-    "Global_Logs": {
-        "Anonymous": false If true your roblox username will not appear in global logs (global logs are in the discord server)
+    "Proxies": {
+        "Enabled": false,
+        "File": "proxies.txt",            // see proxies.example.txt for formats
+        "Proxies_only": false,            // false = also check from your own IP
+        "Send_check_cookie": false,       // false = proxies check anonymously
+        "Max_failures": 5,                // bench a proxy after this many errors in a row
+        "Tor": {"Enabled": false, "Path": "", "Instances": 10, "Start_port": 9080}
     },
-
+    "Webhook": {"Enabled": false, "Url": "", "Send_fails": false, "UserID_To_Ping": 0},
     "Discord": {
-        "Enabled": false, Put to true if you want to manage the sniper using discord commands
-        "Token": "", If you made Enabled to true you have to add a discord bot token here
-        "StartUp_Message": true, Put it to false for the discord bot to not send the start up message
-        "Use_Prefix": {
-            "Enabled": false,  If true will use both slash and prefix commands for the discord bot
-            "Prefix": "!" Prefix to use when calling the bot (Only works if Use_Prefix's enabled is to true)
-        },
-        "Owner_id": [] Put the discord user ids of people that are allowed to use the commands of the bot
-    }
+        "Enabled": false, "Token": "", "Owner_ids": [], "Startup_message": false,
+        "Prefix": {"Enabled": false, "Prefix": "!"}
+    },
+    "Console": {"Dashboard": true},
+    "Auto_restart": {"Enabled": false, "Minutes": 60},
+    "Update_check": false
 }
 ```
 
-<details>
-<summary><strong>How to get discord token! (Click to expand) </strong></summary>
+You can edit `config.json` while the sniper runs; it is reloaded automatically.
+Buy limits also respect Roblox's own per-user quantity limit.
 
-    
-#### Create a new [application](https://discord.com/developers/applications)
+## Keeping cookies safe
 
-![image](https://github.com/Aspectise/Limited-Sniper/assets/90333100/bd00ca9e-9770-4ff3-894c-67f7504cc01e)
+Any secret field (`Buy_cookie`, entries of `Check_cookies`, `Discord.Token`) accepts:
 
-#### Enable these 3 intents
+* the raw value, which works but sits in plain text in `config.json`
+* `"env:VARIABLE_NAME"` to read an environment variable
+* `"keyring:name"` to read Windows Credential Manager / macOS Keychain / Linux Secret Service.
+  Run `start.bat set-secret buy` (or `discord`, or any name such as `alt1` for a
+  check cookie) and paste the value; it is stored in the OS and `config.json` is
+  updated to point at it. On headless Linux without a keyring use `env:`.
 
-![image](https://github.com/Aspectise/Limited-Sniper/assets/90333100/f13478d8-0888-4f61-8309-c11e784093d3)
+Cookies and tokens are masked in all logs. Purchases always go directly from
+your machine with the buy cookie, never through a proxy.
 
-#### Get the token by clicking copy
+## Controlling the sniper
 
-![image](https://github.com/Aspectise/Limited-Sniper/assets/90333100/1a4e49b3-ce05-4083-b0bb-1ffe65cf296b)
+### Console
 
-#### To invite the bot: Click copy and paste the url in your browser
+The dashboard shows account, Robux, checks per second, latency, buys, errors
+and recent events. Type a command and press Enter. Pressing Enter on an empty
+line pauses the dashboard while you type.
 
-![image](https://github.com/Aspectise/Limited-Sniper/assets/90333100/48ab3857-beb9-412f-8bcc-f95856875b10)
-</details>
-
-# For macOS users
-If you're trying to use the Discord Bot but you're Bot does not go online when you open the sniper
-- Open a terminal and paste this
 ```
-/Applications/Python\ 3.11/Install\ Certificates.command
+stats  list  add <id|link> <max> [limit]  mass_add <max> <id> <id> ...
+remove <id>  remove_all  price <id> <max>  price_all <max>  limit <id> <n|none>
+focus <id> <max>  unfocus  pause  resume  dry_run on|off  history [n]  lanes  restart  quit
 ```
 
-### Features:
-- [x] - **Checks ids fast**
-- [x] - **Supports Multi-ID**
-- [x] - **10 Checkers/Watchers**
-- [x] - **Webhook Support** 
-- [x] - **Can be ran in AWS**
-- [x] - **Can be ran on Linux Based Machines**
-- [x] - **Snipes Paid and resellables UGC Limiteds** 
-- [x] - **Discord Bot w/ Slash Commands (17+ Commands)**
-- [x] - **Supports Tor Proxies (Windows Only)**  
+Start with `--no-dashboard` for plain log output (e.g. on a server).
 
-## Preview:
-![image](https://github.com/Aspectise/Limited-Sniper/assets/90333100/30e9f7e5-ab30-4d45-ac04-43ca2a8da4ab)
+### Discord bot
 
-## IMPORTANT!
-- If you don't trust it don't use it. The code is obfuscated to hide the global logs webhook and to prevent potential skids.
-- If you don't want to use tor proxies and dont trust the tor-proxies.exe, delete the folder.
-- **If main.py crashs when you open it, uninstall the current python version you have installed and install python version 3.11.x**
-## Help
-If you need help setting up the bot join the [Discord](https://discord.gg/deathsniper)
+1. Create an application at <https://discord.com/developers/applications>, add a bot, copy its token.
+2. Invite it with the `bot` and `applications.commands` scopes.
+3. Set `Discord.Enabled`, `Token` (preferably `keyring:discord`) and **`Owner_ids`**.
+   The bot refuses to start without at least one owner. Only owners can use it,
+   and replies are only visible to them.
+4. For prefix commands (`!stats`) also enable `Prefix.Enabled` and the
+   *Message Content* intent in the developer portal. Slash commands need no intents.
+
+Commands: `/stats /list_items /add_item /mass_add_ids /remove_item /remove_all
+/change_max_price /mass_change_max_prices /set_buy_limit /focus /unfocus /pause
+/resume /dry_run /history /lanes /add_user /remove_user /owner_ids /ping /restart /help`
+
+## Scaling: alts, proxies, Tor
+
+Checks run on **lanes**. A lane is your own IP, an alt cookie, or a proxy, and
+each has its own rate limit. When Roblox answers 429 a lane halves its speed and
+cools down, then ramps back up. Lanes that keep failing are benched. More lanes
+means more checks per second.
+
+* **Alt accounts:** add cookies to `Check_cookies`; each one becomes a lane.
+* **Proxies:** copy `proxies.example.txt` to `proxies.txt`, set `Proxies.Enabled`.
+  HTTP and SOCKS5 proxies with or without auth are supported.
+* **Tor:** download the official *Tor Expert Bundle* from
+  <https://www.torproject.org/download/tor/>, set `Proxies.Tor.Path` to `tor.exe`
+  and `Proxies.Tor.Enabled` + `Proxies.Enabled` to `true`. Tor runs as a normal
+  child process (no admin rights, no Windows service) with one circuit per port.
+  Roblox throttles many Tor exits, so private proxies or alts usually work better.
+
+## How it works
+
+```
+watchers (marketplace / catalog / economy) ──► offer ≤ max price?
+          │ round-robin over your items, via lanes      │
+          ▼                                            ▼
+   resolver learns collectible ids          buyer: fetch the live listing,
+                                            re-check price, safety limits and
+                                            buy limit, then POST purchase-item /
+                                            purchase-resale (one idempotency key,
+                                            safe network retry) → history, webhook
+```
+
+## Development
+
+```
+python -m venv .venv
+.venv/bin/pip install --require-hashes -r requirements.txt
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
+```
+
+To change dependencies, edit `requirements.in` and regenerate `requirements.txt`
+with the command at the top of that file.

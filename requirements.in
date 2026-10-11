@@ -1,0 +1,4 @@
+httpx[http2,socks]==0.28.1
+discord.py==2.7.1
+rich==15.0.0
+keyring==25.7.0

@@ -1,0 +1,12 @@
+# your secrets and local data - never commit these
+config.json
+proxies.txt
+data/
+logs/
+.config-*.json
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
