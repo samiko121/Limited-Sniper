@@ -5,4 +5,4 @@ the Discord webhook / bot you configure yourself, your own proxies, and
 (only if you enable Update_check) this repository on GitHub.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"

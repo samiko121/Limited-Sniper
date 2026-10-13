@@ -50,10 +50,23 @@ def run_command(cmds: Commands, line: str) -> list[str]:
             return [f"{k:<18} {v}" for k, v in cmds.stats().items()]
         if name in ("list", "items"):
             rows = cmds.list_items()
-            return [f"{i:<16} {p:>7} R$  limit {l or '-':<4} {n}" for i, n, p, l in rows] or ["Watchlist is empty"]
+            out = [f"[{c.upper():<7}] {i:<16} {p:>9,} R$  limit {l or '-':<4} {n}" for i, n, p, l, c in rows]
+            out.append(f"+ {len(cmds.e.auto_items)} classic auto-deal items from Rolimons (see: deals)")
+            return out
         if name == "add":
             _need(args, 2, "add <id|link> <max price> [buy limit]")
             return [cmds.add(args[0], args[1], args[2] if len(args) > 2 else None)]
+        if name == "add_classic":
+            _need(args, 2, "add_classic <id|link> <max price> [buy limit]")
+            return [cmds.add(args[0], args[1], args[2] if len(args) > 2 else None, category="classic")]
+        if name == "deals":
+            return cmds.deals()
+        if name == "deal_percent":
+            _need(args, 1, "deal_percent <percent>")
+            return [cmds.deal_percent(args[0])]
+        if name == "auto_deals":
+            _need(args, 1, "auto_deals <on|off>")
+            return [cmds.auto_deals(args[0])]
         if name == "mass_add":
             _need(args, 2, "mass_add <max price> <id> <id> ...")
             return [cmds.mass_add(args[0], args[1:])]

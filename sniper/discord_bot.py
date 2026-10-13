@@ -101,14 +101,35 @@ class SniperBot(commands.Bot):
         @owner_only()
         async def list_items(ctx: commands.Context) -> None:
             rows = c.list_items()
-            lines = [f"`{i}` **{p} R$**" + (f" (limit {l})" if l else "") + f" - {n}" for i, n, p, l in rows]
+            lines = [f"`{c.upper()}` `{i}` **{p:,} R$**" + (f" (limit {l})" if l else "") + f" - {n}" for i, n, p, l, c in rows]
+            lines.append(f"+ {len(bot.engine.auto_items)} classic auto-deal items (`/deals`)")
             text = "\n".join(lines[:60]) + (f"\n... and {len(lines) - 60} more" if len(lines) > 60 else "")
             await reply(ctx, text or "Watchlist is empty", INFO, f"{len(rows)} item(s)")
 
-        @self.hybrid_command(name="add_item", description="Watch an item with a max price", aliases=["ai"])
+        @self.hybrid_command(name="add_item", description="Watch a UGC limited with a max price", aliases=["ai"])
         @owner_only()
         async def add_item(ctx: commands.Context, item: str, max_price: int, buy_limit: int | None = None) -> None:
             await reply(ctx, "✅ " + c.add(item, max_price, buy_limit))
+
+        @self.hybrid_command(name="add_classic", description="Watch a classic limited with a fixed max price", aliases=["ac"])
+        @owner_only()
+        async def add_classic(ctx: commands.Context, item: str, max_price: int, buy_limit: int | None = None) -> None:
+            await reply(ctx, "✅ " + c.add(item, max_price, buy_limit, category="classic"))
+
+        @self.hybrid_command(name="deals", description="Classic auto-deal settings (Rolimons values)")
+        @owner_only()
+        async def deals(ctx: commands.Context) -> None:
+            await reply(ctx, "```\n" + "\n".join(c.deals())[:3900] + "\n```", INFO, "Classic auto deals")
+
+        @self.hybrid_command(name="deal_percent", description="Minimum % below value for classic auto deals")
+        @owner_only()
+        async def deal_percent(ctx: commands.Context, percent: float) -> None:
+            await reply(ctx, "✅ " + c.deal_percent(percent))
+
+        @self.hybrid_command(name="auto_deals", description="Turn classic auto deals on or off")
+        @owner_only()
+        async def auto_deals(ctx: commands.Context, enabled: bool) -> None:
+            await reply(ctx, "✅ " + c.auto_deals(enabled))
 
         @self.hybrid_command(name="mass_add_ids", description="Add many ids (text file or list) with one price", aliases=["mai"])
         @owner_only()

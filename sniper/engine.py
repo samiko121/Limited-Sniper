@@ -10,11 +10,12 @@ import httpx
 
 from . import __version__, roblox
 from .buyer import Buyer
-from .config import ConfigError, ConfigStore, Settings
+from .config import AUTO, CLASSIC, UGC, ConfigError, ConfigStore, Settings, WatchItem
 from .history import History
 from .lanes import LanePool
 from .models import Offer
 from .notify import Notifier
+from .rolimons import RolimonsValues, build_auto_items
 from .state import Stats, Watchlist
 from .watchers import CatalogWatcher, EconomyWatcher, MarketplaceWatcher, resolve_loop
 
@@ -29,15 +30,18 @@ class Engine:
         lanes: LanePool,
         history: History,
         notifier: Notifier,
+        rolimons: RolimonsValues | None = None,
     ):
         self.store = store
         self.buy_session = buy_session
         self.lanes = lanes
         self.history = history
         self.notifier = notifier
+        self.rolimons = rolimons
+        self.auto_items: dict[int, WatchItem] = {}
         self.stats = Stats()
         self.watchlist = Watchlist()
-        self.watchlist.set_items(self.settings.items)
+        self.apply_config()
         self.buyer = Buyer(buy_session, lambda: self.settings, self.watchlist, self.stats, history, notifier)
         self.paused = False
         self.stop_event = asyncio.Event()
@@ -77,12 +81,16 @@ class Engine:
         spawn(self._robux_refresher(), "robux")
         spawn(self._config_watcher(), "config")
         spawn(self.notifier.run(), "webhook")
+        if self.rolimons:
+            spawn(self._rolimons_loop(), "rolimons")
         if s.auto_restart_minutes:
             spawn(self._auto_restart(s.auto_restart_minutes), "auto-restart")
         self.stats.task = "Checking"
         watchers = [n for n, on in (("marketplace", s.watch_marketplace), ("catalog", s.watch_catalog), ("economy", s.watch_economy)) if on]
         self.stats.event(
-            f"Limited Sniper v{__version__} running: {len(self.watchlist.items)} items, "
+            f"Limited Sniper v{__version__} running: "
+            + ", ".join(f"{n} {label}" for label, n in zip(("UGC", "classic", "classic auto-deal"), self.counts().values()))
+            + " items, "
             f"{len(self.lanes.lanes)} lane(s), watchers: {', '.join(watchers) or 'none'}"
             + (" [DRY RUN]" if s.dry_run else "")
         )
@@ -115,14 +123,65 @@ class Engine:
         if self.paused:
             return
         item = self.watchlist.get(offer.asset_id)
-        if item is None or offer.price > item.max_price:
+        if item is None or offer.price > item.max_price or offer.price < item.min_price:
             return
         self.buyer.consider(offer, item)
 
     # --- control -------------------------------------------------------------------
 
     def apply_config(self) -> None:
-        self.watchlist.set_items(self.settings.items)
+        s = self.settings
+        if s.auto_deals_enabled and self.rolimons and self.rolimons.items:
+            self.auto_items = build_auto_items(self.rolimons.items, s)
+            for asset_id in self.auto_items:
+                name = self.rolimons.name(asset_id)
+                if name and not self.watchlist.meta_for(asset_id).name:
+                    self.watchlist.meta_for(asset_id).name = name
+        else:
+            self.auto_items = {}
+        # manual entries win over automatic ones for the same id
+        self.watchlist.set_items({**self.auto_items, **s.items})
+
+    def counts(self) -> dict[str, int]:
+        items = self.watchlist.items
+        return {c: sum(1 for i in items.values() if i.category == c) for c in (UGC, CLASSIC, AUTO)}
+
+    async def load_rolimons(self) -> None:
+        """Fetch classic limited values before the watchers start."""
+        if not (self.settings.auto_deals_enabled and self.rolimons):
+            return
+        try:
+            await self.rolimons.refresh()
+            source = "Rolimons"
+        except (httpx.HTTPError, ValueError) as e:
+            if not self.rolimons.load_cache():
+                self.stats.event(f"Could not load Rolimons values ({e}) - classic auto deals are off until it works", logging.ERROR)
+                return
+            source = "cached Rolimons data"
+        self.apply_config()
+        s = self.settings
+        self.stats.event(
+            f"Classic auto deals: {len(self.auto_items)} items from {source} "
+            f"(>= {s.min_deal_percent:g}% below {s.deal_calculation.replace('_or_', '/')}, "
+            f"prices {s.ignore_prices_below:,}-{s.ignore_prices_above:,} R$"
+            + (", valued only" if s.only_valued_items else "")
+            + (", no projecteds" if s.skip_known_projecteds else "") + ")"
+        )
+
+    async def _rolimons_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.settings.rolimons_refresh_minutes * 60)
+            if not (self.settings.auto_deals_enabled and self.rolimons):
+                continue
+            try:
+                if await self.rolimons.refresh():
+                    before = dict(self.auto_items)
+                    self.apply_config()
+                    changed = sum(1 for k, v in self.auto_items.items() if before.get(k) != v)
+                    if changed:
+                        self.stats.event(f"Rolimons values updated: {changed} classic deal prices changed")
+            except (httpx.HTTPError, ValueError) as e:
+                log.warning("Rolimons refresh failed: %s", e)
 
     async def _config_watcher(self) -> None:
         """Pick up hand edits of config.json without a restart."""

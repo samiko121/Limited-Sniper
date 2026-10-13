@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 
 from . import __version__
-from .config import WatchItem, parse_item_ref
+from .config import AUTO, CLASSIC, UGC, WatchItem, parse_item_ref
 from .engine import Engine
 
 
@@ -24,13 +24,17 @@ class Help:
 
 HELP = [
     Help("stats", "", "Show sniper statistics"),
-    Help("list", "", "List watched items and their max prices"),
-    Help("add", "<id|link> <max price> [buy limit]", "Watch an item"),
-    Help("mass_add", "<max price> <id> <id> ...", "Watch many items with one price"),
+    Help("list", "", "List manually added items (UGC and classic)"),
+    Help("add", "<id|link> <max price> [buy limit]", "Watch a UGC limited"),
+    Help("add_classic", "<id|link> <max price> [buy limit]", "Watch a classic limited at a fixed max price"),
+    Help("mass_add", "<max price> <id> <id> ...", "Watch many UGC items with one price"),
+    Help("deals", "", "Classic auto-deal settings and top watched deals"),
+    Help("deal_percent", "<percent>", "Minimum % below value for classic auto deals"),
+    Help("auto_deals", "<on|off>", "Turn classic auto deals from Rolimons on/off"),
     Help("remove", "<id|link>", "Stop watching an item"),
     Help("remove_all", "", "Clear the watchlist"),
     Help("price", "<id|link> <max price>", "Change an item's max price"),
-    Help("price_all", "<max price>", "Change every item's max price"),
+    Help("price_all", "<max price>", "Change every manual item's max price"),
     Help("limit", "<id|link> <n|none>", "Set/clear an item's buy limit"),
     Help("focus", "<id|link> <max price>", "Only check this one item"),
     Help("unfocus", "", "Go back to the whole watchlist"),
@@ -73,21 +77,24 @@ class Commands:
 
     # --- watchlist ---------------------------------------------------------------
 
-    def add(self, ref: str | int, max_price: str | int, buy_limit: str | int | None = None) -> str:
+    def add(self, ref: str | int, max_price: str | int, buy_limit: str | int | None = None, category: str = UGC) -> str:
         asset_id, price = _item(ref), _price(max_price)
         limit = None
         if buy_limit not in (None, "", "none"):
             limit = _price(buy_limit)
             if limit < 1:
                 raise CommandError("buy limit must be at least 1")
+        if category not in (UGC, CLASSIC):
+            raise CommandError("category must be ugc or classic")
         items = self._items()
         existed = asset_id in items
-        items[asset_id] = WatchItem(asset_id, price, limit)
+        items[asset_id] = WatchItem(asset_id, price, limit, category)
         self._save(items)
         verb = "Updated" if existed else "Added"
-        return f"{verb} {asset_id} with max price {price} R$" + (f" and buy limit {limit}" if limit else "")
+        label = "UGC" if category == UGC else "classic"
+        return f"{verb} {label} item {asset_id} with max price {price} R$" + (f" and buy limit {limit}" if limit else "")
 
-    def mass_add(self, max_price: str | int, refs: list[str]) -> str:
+    def mass_add(self, max_price: str | int, refs: list[str], category: str = UGC) -> str:
         price = _price(max_price)
         items = self._items()
         added, bad = 0, []
@@ -99,7 +106,7 @@ class Commands:
                 continue
             if asset_id not in items:
                 added += 1
-            items[asset_id] = WatchItem(asset_id, price, items[asset_id].buy_limit if asset_id in items else None)
+            items[asset_id] = WatchItem(asset_id, price, items[asset_id].buy_limit if asset_id in items else None, category)
         if added or len(refs) > len(bad):
             self._save(items)
         msg = f"Added {added} item(s) at {price} R$"
@@ -111,6 +118,8 @@ class Commands:
         asset_id = _item(ref)
         items = self._items()
         if asset_id not in items:
+            if asset_id in self.e.auto_items:
+                raise CommandError(f"{asset_id} is a classic auto deal - add it to Classic.Auto_deals.Exclude_ids to skip it")
             raise CommandError(f"{asset_id} is not in the watchlist")
         del items[asset_id]
         self._save(items)
@@ -126,13 +135,13 @@ class Commands:
         items = self._items()
         if asset_id not in items:
             raise CommandError(f"{asset_id} is not in the watchlist")
-        items[asset_id] = WatchItem(asset_id, price, items[asset_id].buy_limit)
+        items[asset_id] = WatchItem(asset_id, price, items[asset_id].buy_limit, items[asset_id].category)
         self._save(items)
         return f"Max price of {asset_id} is now {price} R$"
 
     def price_all(self, max_price: str | int) -> str:
         price = _price(max_price)
-        items = {k: WatchItem(k, price, v.buy_limit) for k, v in self._items().items()}
+        items = {k: WatchItem(k, price, v.buy_limit, v.category) for k, v in self._items().items()}
         self._save(items)
         return f"Max price of all {len(items)} item(s) is now {price} R$"
 
@@ -142,16 +151,56 @@ class Commands:
         if asset_id not in items:
             raise CommandError(f"{asset_id} is not in the watchlist")
         limit = None if value in (None, "", "none", "0", 0) else _price(value)
-        items[asset_id] = WatchItem(asset_id, items[asset_id].max_price, limit)
+        items[asset_id] = WatchItem(asset_id, items[asset_id].max_price, limit, items[asset_id].category)
         self._save(items)
         return f"Buy limit of {asset_id} " + (f"set to {limit}" if limit else "cleared")
 
-    def list_items(self) -> list[tuple[int, str, int, int | None]]:
+    def list_items(self) -> list[tuple[int, str, int, int | None, str]]:
+        """Manual items, UGC first then classic."""
         wl = self.e.watchlist
+        order = {UGC: 0, CLASSIC: 1}
         return [
-            (i, (wl.meta.get(i).name if wl.meta.get(i) else None) or "?", it.max_price, it.buy_limit)
-            for i, it in sorted(self.e.settings.items.items())
+            (i, (wl.meta.get(i).name if wl.meta.get(i) else None) or "?", it.max_price, it.buy_limit, it.category)
+            for i, it in sorted(self.e.settings.items.items(), key=lambda kv: (order.get(kv[1].category, 2), kv[0]))
         ]
+
+    # --- classic auto deals ----------------------------------------------------------
+
+    def deals(self, top: int = 10) -> list[str]:
+        s, e = self.e.settings, self.e
+        roli = e.rolimons
+        age = f"{(time.time() - roli.updated_at) / 60:.0f} min ago" if roli and roli.updated_at else "never"
+        lines = [
+            f"Classic auto deals: {'ON' if s.auto_deals_enabled else 'OFF'} - {len(e.auto_items)} items watched",
+            f"  Only valued items: {s.only_valued_items}   Skip known projecteds: {s.skip_known_projecteds}",
+            f"  No deals below: {s.min_deal_percent:g}%   Deal calculation: {s.deal_calculation.replace('_or_', '/')}",
+            f"  Ignore prices below {s.ignore_prices_below:,} and above {s.ignore_prices_above:,} R$",
+            f"  Rolimons values updated: {age}",
+        ]
+        if e.auto_items:
+            lines.append(f"  Highest value items (buy at or below):")
+            best = sorted(e.auto_items.values(), key=lambda i: -(i.ref_value or 0))[:top]
+            for it in best:
+                name = e.watchlist.meta_for(it.asset_id).name or str(it.asset_id)
+                lines.append(f"    {name[:32]:<32} value {it.ref_value:>10,}  buy <= {it.max_price:>10,}")
+        return lines
+
+    def deal_percent(self, value: str | float) -> str:
+        try:
+            pct = float(value)
+        except (TypeError, ValueError):
+            raise CommandError(f"'{value}' is not a number") from None
+        self.e.store.update_setting("Classic.Auto_deals", "Min_deal_percent", pct)
+        self.e.apply_config()
+        return f"Classic auto deals now need >= {pct:g}% below value ({len(self.e.auto_items)} items)"
+
+    def auto_deals(self, value: str | bool) -> str:
+        on = value if isinstance(value, bool) else str(value).lower() in ("on", "true", "1", "yes")
+        self.e.store.update_setting("Classic.Auto_deals", "Enabled", on)
+        self.e.apply_config()
+        if on and self.e.rolimons and not self.e.rolimons.items:
+            return "Classic auto deals ON - values load on the next Rolimons refresh (or restart)"
+        return f"Classic auto deals {'ON' if on else 'OFF'} ({len(self.e.auto_items)} items)"
 
     # --- run control ---------------------------------------------------------------
 
@@ -201,7 +250,7 @@ class Commands:
         return {
             "Account": f"{st.username} ({st.user_id})",
             "Robux": f"{st.robux:,}" if st.robux is not None else "?",
-            "Items": str(len(s.items)),
+            "Items": "UGC {} | classic {} | classic auto {}".format(*self.e.counts().values()),
             "Watching": self.e.watchlist.describe(),
             "Uptime": str(datetime.timedelta(seconds=int(st.uptime))),
             "Task": st.task,

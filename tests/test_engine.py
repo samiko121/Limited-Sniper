@@ -90,7 +90,7 @@ def test_commands_update_config_and_watchlist(config_file, tmp_path):
     store.load()
     assert 11 in store.settings.items
     out = run_command(c, "add 12345 7")
-    assert out == ["Added 12345 with max price 7 R$"]
+    assert out == ["Added UGC item 12345 with max price 7 R$"]
     assert run_command(c, "price nope 5")[0].startswith("error:")
     asyncio.run(engine.lanes.aclose())
     asyncio.run(engine.buy_session.aclose())

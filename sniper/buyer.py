@@ -37,6 +37,13 @@ def effective_limit(item: WatchItem, settings: Settings, roblox_limit: int | Non
     return min(limits) if limits else None
 
 
+def deal_text(offer: Offer, item: WatchItem) -> str:
+    if not item.ref_value:
+        return ""
+    pct = (item.ref_value - offer.price) / item.ref_value * 100
+    return f" - {pct:.0f}% below value {item.ref_value:,}"
+
+
 def guard_reason(
     offer: Offer,
     item: WatchItem,
@@ -50,6 +57,8 @@ def guard_reason(
     """Return why the offer must NOT be bought, or None if it is fine."""
     if offer.price > item.max_price:
         return f"price {offer.price} > max {item.max_price}"
+    if offer.price < item.min_price:
+        return f"price {offer.price} < Ignore_prices_below {item.min_price}"
     if settings.max_price_per_purchase and offer.price > settings.max_price_per_purchase:
         return f"price {offer.price} > Max_price_per_purchase {settings.max_price_per_purchase}"
     if settings.daily_spend_limit and spent_today + pending + offer.price > settings.daily_spend_limit:
@@ -92,7 +101,7 @@ class Buyer:
     # -- entry point from watchers (must stay cheap) ---------------------------
 
     def consider(self, offer: Offer, item: WatchItem) -> None:
-        if offer.price > item.max_price:
+        if offer.price > item.max_price or offer.price < item.min_price:
             return
         key = offer.key
         now = time.monotonic()
@@ -182,16 +191,16 @@ class Buyer:
 
         try:
             if settings.dry_run:
-                self.stats.event(f"[DRY RUN] would buy {offer.name} ({offer.kind}) for {offer.price} R$", logging.WARNING)
+                self.stats.event(f"[DRY RUN] would buy {offer.name} ({offer.kind}) for {offer.price:,} R${deal_text(offer, item)}", logging.WARNING)
                 self.history.add(Purchase(time.time(), offer.asset_id, offer.name, offer.price, offer.kind, "dry_run", offer.serial, None))
                 self.notifier.dry_run(offer)
                 return 60.0
-            return await self._buy(offer)
+            return await self._buy(offer, item)
         finally:
             async with self._lock:
                 self.pending -= offer.price
 
-    async def _buy(self, offer: Offer) -> float:
+    async def _buy(self, offer: Offer, item: WatchItem) -> float:
         self.stats.task = "Buying"
         self.stats.attempts += 1
         key = str(uuid.uuid4())
@@ -218,7 +227,7 @@ class Buyer:
                 self.owned[offer.collectible_item_id] = (cached[0] + 1, cached[1])
             if self.stats.robux is not None:
                 self.stats.robux -= offer.price
-            self.stats.event(f"BOUGHT {offer.name} ({offer.kind}) for {offer.price} R$ in {took:.0f} ms")
+            self.stats.event(f"BOUGHT {offer.name} ({offer.kind}) for {offer.price:,} R$ in {took:.0f} ms{deal_text(offer, item)}")
             asyncio.get_running_loop().create_task(self._after_buy(offer))
             # a resale listing is gone once bought; original stock can be bought
             # again (up to the buy limit) as long as it stays under max price

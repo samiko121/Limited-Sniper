@@ -21,6 +21,7 @@ from .engine import Engine
 from .history import History
 from .lanes import Lane, LanePool, load_proxies, proxy_label
 from .notify import Notifier
+from .rolimons import RolimonsValues
 from .tor import TorProcess
 
 log = logging.getLogger("sniper")
@@ -121,7 +122,8 @@ async def run(config_path: Path, args: argparse.Namespace) -> bool:
     lanes = build_lanes(s, check_cookies, buy_cookie, proxies)
     history = History(ROOT / "data" / "history.db")
     notifier = Notifier(s.webhook_url if s.webhook_enabled else None, s.webhook_send_fails, s.webhook_ping_user)
-    engine = Engine(store, buy_session, lanes, history, notifier)
+    rolimons = RolimonsValues(ROOT / "data" / "rolimons.json")
+    engine = Engine(store, buy_session, lanes, history, notifier, rolimons)
     cmds = Commands(engine)
     ui_tasks: list[asyncio.Task] = []
     try:
@@ -138,6 +140,7 @@ async def run(config_path: Path, args: argparse.Namespace) -> bool:
                     log.warning("Check cookie for %s is invalid - that lane will check anonymously", lane.label)
                 except (roblox.RobloxHTTPError, httpx.HTTPError) as e:
                     log.warning("Could not verify %s: %s", lane.label, e)
+        await engine.load_rolimons()
         engine.start()
         if s.update_check:
             asyncio.get_running_loop().create_task(check_update())
@@ -156,6 +159,7 @@ async def run(config_path: Path, args: argparse.Namespace) -> bool:
         await asyncio.gather(*ui_tasks, return_exceptions=True)
         await engine.stop()
         await notifier.aclose()
+        await rolimons.aclose()
         await lanes.aclose()
         await buy_session.aclose()
         history.close()

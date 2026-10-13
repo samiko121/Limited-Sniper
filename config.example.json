@@ -5,9 +5,25 @@
         "Use_buy_cookie_for_checks": false,
         "Refresh_on_start": false
     },
-    "Items": {
-        "15181542808": 1,
-        "13335138883": {"max_price": 5, "buy_limit": 2}
+    "UGC": {
+        "Items": {
+            "15181542808": 1,
+            "13335138883": {"max_price": 5, "buy_limit": 2}
+        }
+    },
+    "Classic": {
+        "Items": {},
+        "Auto_deals": {
+            "Enabled": true,
+            "Only_valued_items": true,
+            "Skip_known_projecteds": true,
+            "Min_deal_percent": 26,
+            "Ignore_prices_above": 1000000,
+            "Ignore_prices_below": 1000,
+            "Deal_calculation": "value_or_rap",
+            "Refresh_minutes": 2,
+            "Exclude_ids": []
+        }
     },
     "Global_buy_limit": {
         "Enabled": false,

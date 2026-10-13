@@ -19,7 +19,23 @@ DEFAULTS: dict[str, Any] = {
         "Use_buy_cookie_for_checks": False,
         "Refresh_on_start": False,
     },
-    "Items": {},
+    # UGC limiteds (new collectibles made by players): manual ids + max price
+    "UGC": {"Items": {}},
+    # Classic Roblox limiteds: manual ids and/or automatic deals from Rolimons values
+    "Classic": {
+        "Items": {},
+        "Auto_deals": {
+            "Enabled": True,
+            "Only_valued_items": True,
+            "Skip_known_projecteds": True,
+            "Min_deal_percent": 26,
+            "Ignore_prices_above": 1000000,
+            "Ignore_prices_below": 1000,
+            "Deal_calculation": "value_or_rap",
+            "Refresh_minutes": 2,
+            "Exclude_ids": [],
+        },
+    },
     "Global_buy_limit": {"Enabled": False, "Limit": 3},
     "Safety": {
         "Dry_run": False,
@@ -67,11 +83,18 @@ class ConfigError(Exception):
     pass
 
 
+UGC, CLASSIC, AUTO = "ugc", "classic", "auto"  # AUTO = classic deal found via Rolimons values
+DEAL_CALCULATIONS = ("value_or_rap", "value", "rap")
+
+
 @dataclass(frozen=True)
 class WatchItem:
     asset_id: int
     max_price: int
     buy_limit: int | None = None
+    category: str = UGC
+    min_price: int = 0
+    ref_value: int | None = None  # Rolimons value (or RAP) the deal % is measured against
 
     def to_json(self) -> int | dict[str, int]:
         if self.buy_limit is None:
@@ -119,7 +142,16 @@ class Settings:
     dashboard: bool
     auto_restart_minutes: int
     update_check: bool
-    items: dict[int, WatchItem] = field(default_factory=dict)
+    auto_deals_enabled: bool = False
+    only_valued_items: bool = True
+    skip_known_projecteds: bool = True
+    min_deal_percent: float = 26
+    ignore_prices_above: int = 1000000
+    ignore_prices_below: int = 1000
+    deal_calculation: str = "value_or_rap"
+    rolimons_refresh_minutes: float = 2
+    auto_exclude_ids: frozenset[int] = frozenset()
+    items: dict[int, WatchItem] = field(default_factory=dict)  # manual UGC + classic items
 
 
 def parse_item_ref(text: str | int) -> int:
@@ -137,7 +169,7 @@ def parse_item_ref(text: str | int) -> int:
     return value
 
 
-def parse_items(raw: Any) -> dict[int, WatchItem]:
+def parse_items(raw: Any, category: str = UGC) -> dict[int, WatchItem]:
     if raw is None:
         return {}
     if isinstance(raw, list):  # very old format: list of ids without prices
@@ -165,7 +197,9 @@ def parse_items(raw: Any) -> dict[int, WatchItem]:
             raise ConfigError(f"Items.{key}: expected a price or {{\"max_price\": .., \"buy_limit\": ..}}")
         if max_price < 0:
             raise ConfigError(f"Items.{key}: price can not be negative")
-        items[asset_id] = WatchItem(asset_id, max_price, limit)
+        if asset_id in items:
+            raise ConfigError(f"Items.{key} is listed twice")
+        items[asset_id] = WatchItem(asset_id, max_price, limit, category)
     return items
 
 
@@ -213,6 +247,11 @@ def migrate_legacy(raw: dict) -> dict:
     if "StartUp_Message" in discord:
         discord["Startup_message"] = discord.pop("StartUp_Message")
     raw.pop("Global_Logs", None)  # the old hidden "global logs" no longer exist
+    if "Items" in raw:  # before v2.1 there was one "Items" list; it moves to UGC
+        old_items = raw.pop("Items") or {}
+        raw.setdefault("UGC", {}).setdefault("Items", {})
+        if isinstance(old_items, dict):
+            raw["UGC"]["Items"] = {**old_items, **raw["UGC"]["Items"]}
     watchers = raw.get("Watchers", {})
     watchers.pop("Requests_per_second_per_lane", None)  # v2.0.0 -> per-endpoint Rate_per_lane
     watchers.pop("Workers_per_watcher", None)
@@ -301,7 +340,44 @@ def build_settings(raw: dict) -> Settings:
         auto_restart_minutes=_int(raw["Auto_restart"]["Minutes"], "Auto_restart.Minutes", 1)
         if _bool(raw["Auto_restart"]["Enabled"], "Auto_restart.Enabled") else 0,
         update_check=_bool(raw["Update_check"], "Update_check"),
-        items=parse_items(raw.get("Items")),
+        **_classic_settings(raw),
+    )
+
+
+def _classic_settings(raw: dict) -> dict:
+    ugc = parse_items(raw["UGC"].get("Items"), UGC)
+    classic = parse_items(raw["Classic"].get("Items"), CLASSIC)
+    both = set(ugc) & set(classic)
+    if both:
+        raise ConfigError(f"item {min(both)} is in both UGC.Items and Classic.Items")
+    a = raw["Classic"]["Auto_deals"]
+    pct = a["Min_deal_percent"]
+    if isinstance(pct, bool) or not isinstance(pct, (int, float)) or not 0 <= pct < 100:
+        raise ConfigError("Classic.Auto_deals.Min_deal_percent must be between 0 and 99")
+    calc = str(a["Deal_calculation"]).lower().replace("/", "_or_").replace("(", "").replace(")", "")
+    if calc not in DEAL_CALCULATIONS:
+        raise ConfigError(f"Classic.Auto_deals.Deal_calculation must be one of {', '.join(DEAL_CALCULATIONS)}")
+    refresh = a["Refresh_minutes"]
+    if isinstance(refresh, bool) or not isinstance(refresh, (int, float)) or refresh < 1:
+        raise ConfigError("Classic.Auto_deals.Refresh_minutes must be at least 1")
+    lo = _int(a["Ignore_prices_below"], "Classic.Auto_deals.Ignore_prices_below")
+    hi = _int(a["Ignore_prices_above"], "Classic.Auto_deals.Ignore_prices_above", 1)
+    if lo > hi:
+        raise ConfigError("Classic.Auto_deals.Ignore_prices_below is higher than Ignore_prices_above")
+    excl = a.get("Exclude_ids") or []
+    if not isinstance(excl, list):
+        raise ConfigError("Classic.Auto_deals.Exclude_ids must be a list of item ids")
+    return dict(
+        auto_deals_enabled=_bool(a["Enabled"], "Classic.Auto_deals.Enabled"),
+        only_valued_items=_bool(a["Only_valued_items"], "Classic.Auto_deals.Only_valued_items"),
+        skip_known_projecteds=_bool(a["Skip_known_projecteds"], "Classic.Auto_deals.Skip_known_projecteds"),
+        min_deal_percent=float(pct),
+        ignore_prices_above=hi,
+        ignore_prices_below=lo,
+        deal_calculation=calc,
+        rolimons_refresh_minutes=float(refresh),
+        auto_exclude_ids=frozenset(_int(x, "Classic.Auto_deals.Exclude_ids[]", 1) for x in excl),
+        items={**ugc, **classic},
     )
 
 
@@ -368,7 +444,8 @@ class ConfigStore:
     # --- item mutations (used by console and Discord commands) ---------------
 
     def _write_items(self, items: dict[int, WatchItem]) -> None:
-        self.raw["Items"] = {str(k): v.to_json() for k, v in items.items()}
+        self.raw["UGC"]["Items"] = {str(k): v.to_json() for k, v in items.items() if v.category == UGC}
+        self.raw["Classic"]["Items"] = {str(k): v.to_json() for k, v in items.items() if v.category == CLASSIC}
         self.settings = build_settings(self.raw)
         self.save()
 
@@ -377,12 +454,16 @@ class ConfigStore:
             self._write_items(items)
 
     def update_setting(self, section: str, key: str, value: Any) -> None:
+        """section may be nested with dots, e.g. "Classic.Auto_deals"."""
         with self._lock:
-            old = self.raw[section][key]
-            self.raw[section][key] = value
+            target = self.raw
+            for part in section.split("."):
+                target = target[part]
+            old = target[key]
+            target[key] = value
             try:
                 self.settings = build_settings(self.raw)
             except ConfigError:
-                self.raw[section][key] = old
+                target[key] = old
                 raise
             self.save()

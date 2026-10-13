@@ -1,7 +1,12 @@
 # Limited Sniper
 
-Snipes Roblox UGC limiteds (new stock **and** resale listings, including classic
-limiteds) at or below the max price you set per item.
+Snipes Roblox limiteds, with two clearly separate modes:
+
+| | **UGC limiteds** | **Classic limiteds** |
+|---|---|---|
+| What | player-made collectibles (new stock + resales) | Roblox's classic limiteds (resales) |
+| Config | `UGC.Items`: id + your max price | `Classic.Items`: id + max price, **and/or** `Classic.Auto_deals` |
+| Automatic | - | every Rolimons-valued item becomes a target, bought when listed >= 26% below value |
 
 **v2 is a full rewrite**: plain readable Python, no obfuscation, no telemetry,
 no bundled executables. The program only talks to:
@@ -11,6 +16,7 @@ no bundled executables. The program only talks to:
 | `*.roblox.com` | checking items and buying them |
 | your Discord webhook / bot | only if you enable them |
 | your own proxies / your own Tor | only if you enable them |
+| `www.rolimons.com/itemapi/itemdetails` | public classic limited values, only if `Classic.Auto_deals` is on (one GET every few minutes, nothing about you is sent) |
 | `raw.githubusercontent.com/samiko121/Limited-Sniper` | only if `Update_check` is `true` |
 
 A test (`tests/test_misc.py`) fails if any other host shows up in the code.
@@ -43,9 +49,25 @@ Config files from v1.x are migrated automatically.
         "Use_buy_cookie_for_checks": false, // false = check anonymously when no alts are set
         "Refresh_on_start": false         // old "Bypass_cookies": re-issue the cookie for this IP/region
     },
-    "Items": {
-        "15181542808": 1,                               // item id: max price
-        "13335138883": {"max_price": 5, "buy_limit": 2} // with its own buy limit
+    "UGC": {                              // ---- UGC limiteds (player-made collectibles) ----
+        "Items": {
+            "15181542808": 1,                               // item id: max price
+            "13335138883": {"max_price": 5, "buy_limit": 2} // with its own buy limit
+        }
+    },
+    "Classic": {                          // ---- Classic Roblox limiteds ----
+        "Items": {},                      // manual ids with a fixed max price (same format as UGC)
+        "Auto_deals": {                   // automatic deals based on Rolimons values
+            "Enabled": true,
+            "Only_valued_items": true,    // only items Rolimons has given a value
+            "Skip_known_projecteds": true,// ignore items Rolimons marks as projected
+            "Min_deal_percent": 26,       // "no deals below": price must be >= 26% under value
+            "Ignore_prices_above": 1000000,
+            "Ignore_prices_below": 1000,
+            "Deal_calculation": "value_or_rap", // value (RAP if not valued) | value | rap
+            "Refresh_minutes": 2,         // how often values are re-read from Rolimons
+            "Exclude_ids": []             // classic items you never want auto-bought
+        }
     },
     "Global_buy_limit": {"Enabled": false, "Limit": 3}, // max copies to own per item
     "Safety": {
@@ -85,6 +107,24 @@ Config files from v1.x are migrated automatically.
 You can edit `config.json` while the sniper runs; it is reloaded automatically.
 Buy limits also respect Roblox's own per-user quantity limit.
 
+## Classic auto deals (Rolimons)
+
+When `Classic.Auto_deals.Enabled` is on, the sniper reads the value, RAP and
+projected flag of every classic limited from Rolimons, applies your filters and
+pre-computes a max price per item:
+
+```
+deal %    = (value - price) / value * 100      (RAP instead of value per Deal_calculation)
+max price = highest price with deal % >= Min_deal_percent, capped at Ignore_prices_above
+```
+
+So checking a new listing is one number comparison. Values are refreshed every
+`Refresh_minutes` (and cached in `data/rolimons.json` for restarts); when
+Rolimons changes a value the max price follows automatically. With the defaults
+(valued only, no projecteds, 26%, 1,000-1,000,000 R$) about 500 items are
+watched. Manual `Classic.Items` entries override the automatic price for that id.
+Commands: `deals`, `deal_percent <n>`, `auto_deals on|off`, `add_classic <id> <max>`.
+
 ## Keeping cookies safe
 
 Any secret field (`Buy_cookie`, entries of `Check_cookies`, `Discord.Token`) accepts:
@@ -108,7 +148,8 @@ and recent events. Type a command and press Enter. Pressing Enter on an empty
 line pauses the dashboard while you type.
 
 ```
-stats  list  add <id|link> <max> [limit]  mass_add <max> <id> <id> ...
+stats  list  add <id|link> <max> [limit]  add_classic <id|link> <max> [limit]  mass_add <max> <id> ...
+deals  deal_percent <n>  auto_deals on|off
 remove <id>  remove_all  price <id> <max>  price_all <max>  limit <id> <n|none>
 focus <id> <max>  unfocus  pause  resume  dry_run on|off  history [n]  lanes  restart  quit
 ```
@@ -125,7 +166,7 @@ Start with `--no-dashboard` for plain log output (e.g. on a server).
 4. For prefix commands (`!stats`) also enable `Prefix.Enabled` and the
    *Message Content* intent in the developer portal. Slash commands need no intents.
 
-Commands: `/stats /list_items /add_item /mass_add_ids /remove_item /remove_all
+Commands: `/stats /list_items /add_item /add_classic /deals /deal_percent /auto_deals /mass_add_ids /remove_item /remove_all
 /change_max_price /mass_change_max_prices /set_buy_limit /focus /unfocus /pause
 /resume /dry_run /history /lanes /add_user /remove_user /owner_ids /ping /restart /help`
 

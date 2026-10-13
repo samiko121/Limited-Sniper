@@ -23,6 +23,7 @@ def test_no_telemetry_hosts_in_source():
     allowed = re.compile(
         r"^https://(?:[a-z]+\.)?roblox\.com\b"
         r"|^https://raw\.githubusercontent\.com/samiko121/Limited-Sniper/"
+        r"|^https://www\.rolimons\.com/itemapi/itemdetails$"  # public classic limited values (GET only)
         r"|^https://www\.torproject\.org/"
         r"|^https://discord\.com/api/webhooks/\.\.\."  # config error message
         r"|^https://www\.python\.org/"
