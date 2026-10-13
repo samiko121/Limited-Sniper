@@ -23,10 +23,10 @@
         "Marketplace_batch": true,
         "Catalog_batch": true,
         "Economy_single": true,
-        "Workers_per_watcher": 2,
-        "Marketplace_batch_size": 30,
+        "Marketplace_batch_size": 120,
         "Catalog_batch_size": 120,
-        "Requests_per_second_per_lane": 6
+        "Rate_per_lane": {"Marketplace": 2, "Catalog": 0.5, "Economy": 15},
+        "Workers": {"Marketplace": 2, "Catalog": 1, "Economy": 8}
     },
     "Proxies": {
         "Enabled": false,

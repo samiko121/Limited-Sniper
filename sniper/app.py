@@ -53,13 +53,13 @@ def build_lanes(s: Settings, check_cookies: list[str], buy_cookie: str, proxies:
     if not (s.proxies_enabled and s.proxies_only):
         if cookies:
             for i, ck in enumerate(cookies):
-                lanes.append(Lane(roblox.RobloxSession(ck, name=f"alt-{i + 1}"), s.lane_rps, s.proxy_max_failures))
+                lanes.append(Lane(roblox.RobloxSession(ck, name=f"alt-{i + 1}"), s.lane_rates, s.proxy_max_failures))
         else:
-            lanes.append(Lane(roblox.RobloxSession(None, name="direct"), s.lane_rps, s.proxy_max_failures))
+            lanes.append(Lane(roblox.RobloxSession(None, name="direct"), s.lane_rates, s.proxy_max_failures))
     for i, url in enumerate(proxies):
         ck = cookies[i % len(cookies)] if (cookies and s.proxies_send_check_cookie) else None
         session = roblox.RobloxSession(ck, proxy=url, http2=False, name=f"proxy {proxy_label(url)}")
-        lanes.append(Lane(session, s.lane_rps, s.proxy_max_failures))
+        lanes.append(Lane(session, s.lane_rates, s.proxy_max_failures))
     return LanePool(lanes)
 
 

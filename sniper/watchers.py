@@ -1,10 +1,10 @@
 """Watchers poll Roblox for the watchlist through the lane pool.
 
-  marketplace  apis.roblox.com/marketplace-items  up to 120 items/request, includes
-               listing ids -> the fastest path to a buy
-  catalog      catalog.roblox.com items/details     up to 120 items/request, also
-               learns collectible ids for new items
-  economy      economy.roblox.com assets/{id}       1 item/request, most detailed
+  marketplace  apis.roblox.com/marketplace-items  120 items/request, ~55 ms, includes
+               listing ids -> the main watcher (~700 items/s per lane)
+  catalog      catalog.roblox.com items/details     120 items/request but heavily rate
+               limited (~1 req/s); also learns collectible ids for new items
+  economy      economy.roblox.com assets/{id}       1 item/request, ~500 ms, generous limit
 
 Running several watchers over different endpoints spreads load across Roblox's
 separate rate limits, like the old sniper did, but with shared rate control.
@@ -56,18 +56,18 @@ class Watcher:
             if e.paused or not self.has_work():
                 await asyncio.sleep(0.5)
                 continue
-            lane = await e.lanes.acquire()
+            lane = await e.lanes.acquire(self.name)
             t0 = time.perf_counter()
             try:
                 n = await self.tick(lane)
                 latency = time.perf_counter() - t0
-                lane.ok(latency)
+                lane.ok(self.name, latency)
                 if n:
                     e.stats.add_checks(n, latency)
                 else:
                     await asyncio.sleep(0.25)
             except roblox.RateLimited:
-                lane.rate_limited()
+                lane.rate_limited(self.name)
                 e.stats.rate_limited += 1
             except roblox.Unauthorized:
                 lane.failed()
@@ -161,7 +161,7 @@ async def resolve_loop(engine: "Engine") -> None:
         if not missing:
             await asyncio.sleep(1)
             continue
-        lane = await engine.lanes.acquire()
+        lane = await engine.lanes.acquire("catalog")
         try:
             rows = await roblox.catalog_details(lane.session, missing[:120])
             seen = set()
@@ -173,9 +173,10 @@ async def resolve_loop(engine: "Engine") -> None:
                 if asset_id not in seen:  # deleted / not an asset
                     wl.meta_for(asset_id).not_collectible = True
                     engine.stats.event(f"Item {asset_id} was not found in the catalog", logging.WARNING)
-            lane.ok(0)
+            lane.ok("catalog", 0)
         except roblox.RateLimited:
-            lane.rate_limited()
+            lane.rate_limited("catalog")
+            engine.stats.rate_limited += 1
         except (roblox.RobloxHTTPError, httpx.HTTPError) as err:
             lane.failed()
             log.debug("resolver: %s", err)

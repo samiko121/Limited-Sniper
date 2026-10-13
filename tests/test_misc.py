@@ -81,12 +81,14 @@ def test_proxy_label_hides_credentials():
     assert proxy_label("http://user:secret@1.2.3.4:80") == "1.2.3.4:80"
 
 
-def test_lane_aimd_and_bench():
-    lane = Lane(RobloxSession(None), rps=8, max_failures=2)
-    lane.rate_limited()
-    assert lane.rps == 4 and lane.status == "cooldown"
-    lane.ok(0.1)
-    assert 4 < lane.rps <= 8
+def test_lane_aimd_per_endpoint_and_bench():
+    lane = Lane(RobloxSession(None), {"marketplace": 8, "catalog": 2}, max_failures=2)
+    lane.rate_limited("catalog")
+    assert lane.bucket("catalog").rps == 1 and lane.status == "slow:catalog"
+    assert lane.bucket("marketplace").rps == 8  # other endpoints are not slowed down
+    assert lane.ready_at("marketplace") <= time.monotonic()
+    lane.ok("catalog", 0.1)
+    assert 1 < lane.bucket("catalog").rps <= 2
     lane.failed()
     lane.failed()
     assert lane.status == "benched"
@@ -95,10 +97,10 @@ def test_lane_aimd_and_bench():
 
 def test_pool_respects_rate():
     async def go():
-        pool = LanePool([Lane(RobloxSession(None), rps=20)])
+        pool = LanePool([Lane(RobloxSession(None), 20)])
         t0 = time.monotonic()
         for _ in range(5):
-            await pool.acquire()
+            await pool.acquire("economy")
         took = time.monotonic() - t0
         await pool.aclose()
         return took

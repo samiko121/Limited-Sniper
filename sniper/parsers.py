@@ -11,11 +11,19 @@ from __future__ import annotations
 from .models import RESALE, STOCK, ItemMeta, Offer
 
 
+# Roblox SaleLocationType. Verified live (Oct 2026): 1 ShopOnly, 5 ShopAndAllExperiences,
+# 6 ExperiencesDevApiOnly. Free UGC is very often 6 = only obtainable inside a game.
+_SHOP_LOCATIONS = {0, 1, 3, 5, 7}  # NotApplicable, ShopOnly, ShopAndMyExperiences, ShopAndAllExperiences, ShopAndExperiencesById
+
+
 def _shop_purchasable(sale_location: object) -> bool:
-    # String values look like "ShopOnly", "ShopAndAllExperiences",
-    # "ExperiencesDevApiOnly", ... Only the ones that include the shop can be
-    # bought through the website API. Unknown / numeric values are allowed.
-    if isinstance(sale_location, str) and sale_location:
+    """Only items sold in the shop can be bought through the website API.
+    The economy endpoint reports a number, the catalog/marketplace a name."""
+    if isinstance(sale_location, bool) or sale_location is None or sale_location == "":
+        return True
+    if isinstance(sale_location, int):
+        return sale_location in _SHOP_LOCATIONS
+    if isinstance(sale_location, str):
         return "Shop" in sale_location
     return True
 

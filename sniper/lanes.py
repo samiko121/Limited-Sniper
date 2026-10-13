@@ -1,9 +1,11 @@
-"""Checking "lanes": one identity (alt cookie and/or proxy) with its own rate limit.
+"""Checking "lanes": one identity (alt cookie and/or proxy) with its own rate limits.
 
-Watchers ask the pool for a lane before every request. Each lane has a token
-bucket; when Roblox answers 429 the lane halves its speed and cools down, then
-slowly speeds back up (AIMD). Proxies that keep failing are benched.
-Purchases never go through a lane - they always use the buy account directly.
+Roblox rate limits each API separately, so every lane keeps one token bucket
+per endpoint ("marketplace", "catalog", "economy"). When an endpoint answers
+429 only that bucket halves its speed and cools down, then slowly speeds back
+up (AIMD) - a throttled catalog endpoint no longer slows marketplace checks.
+Lanes (proxies) that keep failing are benched. Purchases never go through a
+lane - they always use the buy account directly.
 """
 
 from __future__ import annotations
@@ -20,39 +22,69 @@ log = logging.getLogger(__name__)
 
 MIN_RPS = 0.2
 
+# Measured against live Roblox (Oct 2026, one anonymous IP, 60 s runs):
+# marketplace batch has a per-minute budget of roughly 110-120 requests (pushing
+# harder gets *fewer* through), catalog batch ~0.5 req/s, economy 15 req/s with
+# no 429s at all. Marketplace requests carry 120 items each.
+DEFAULT_RATES = {"marketplace": 2.0, "catalog": 0.5, "economy": 15.0}
 
-class Lane:
-    def __init__(self, session: RobloxSession, rps: float, max_failures: int = 5, label: str = ""):
-        self.session = session
-        self.label = label or session.name
+
+class Bucket:
+    def __init__(self, rps: float):
         self.max_rps = rps
         self.rps = rps
-        self.max_failures = max_failures
         self.next_at = 0.0
         self.cooldown_until = 0.0
-        self.failures = 0
-        self.benched_until = 0.0
         self.requests = 0
         self.rate_limits = 0
-        self.latency = 0.0
 
     def ready_at(self) -> float:
-        return max(self.next_at, self.cooldown_until, self.benched_until)
+        return max(self.next_at, self.cooldown_until)
 
     def take(self, now: float) -> None:
-        start = max(now, self.next_at)
-        self.next_at = start + 1.0 / self.rps
+        self.next_at = max(now, self.next_at) + 1.0 / self.rps
         self.requests += 1
 
-    def ok(self, latency: float) -> None:
-        self.failures = 0
-        self.latency = latency if not self.latency else self.latency * 0.8 + latency * 0.2
+    def ok(self) -> None:
         self.rps = min(self.max_rps, self.rps + 0.05 * self.max_rps)
 
     def rate_limited(self) -> None:
         self.rate_limits += 1
         self.rps = max(MIN_RPS, self.rps / 2)
         self.cooldown_until = time.monotonic() + min(30.0, 2.0 * (self.max_rps / self.rps))
+
+
+class Lane:
+    def __init__(self, session: RobloxSession, rates: dict[str, float] | float | None = None,
+                 max_failures: int = 5, label: str = ""):
+        if rates is None:
+            rates = DEFAULT_RATES
+        elif not isinstance(rates, dict):  # one rate for every endpoint
+            rates = {k: float(rates) for k in DEFAULT_RATES}
+        self.session = session
+        self.label = label or session.name
+        self.buckets = {k: Bucket(v) for k, v in rates.items()}
+        self.max_failures = max_failures
+        self.failures = 0
+        self.benched_until = 0.0
+        self.latency = 0.0
+
+    def bucket(self, endpoint: str) -> Bucket:
+        b = self.buckets.get(endpoint)
+        if b is None:
+            b = self.buckets[endpoint] = Bucket(DEFAULT_RATES.get(endpoint, 2.0))
+        return b
+
+    def ready_at(self, endpoint: str) -> float:
+        return max(self.bucket(endpoint).ready_at(), self.benched_until)
+
+    def ok(self, endpoint: str, latency: float) -> None:
+        self.failures = 0
+        self.latency = latency if not self.latency else self.latency * 0.8 + latency * 0.2
+        self.bucket(endpoint).ok()
+
+    def rate_limited(self, endpoint: str) -> None:
+        self.bucket(endpoint).rate_limited()
 
     def failed(self) -> None:
         self.failures += 1
@@ -62,13 +94,23 @@ class Lane:
             log.warning("Lane %s benched for %.0fs after %d failures", self.label, backoff, self.failures)
 
     @property
+    def requests(self) -> int:
+        return sum(b.requests for b in self.buckets.values())
+
+    @property
+    def rate_limits(self) -> int:
+        return sum(b.rate_limits for b in self.buckets.values())
+
+    @property
     def status(self) -> str:
         now = time.monotonic()
         if self.benched_until > now:
             return "benched"
-        if self.cooldown_until > now:
-            return "cooldown"
-        return "ok"
+        cooling = [k for k, b in self.buckets.items() if b.cooldown_until > now]
+        return f"slow:{','.join(cooling)}" if cooling else "ok"
+
+    def describe_rates(self) -> str:
+        return " ".join(f"{k[:4]} {b.rps:.1f}/{b.max_rps:g}" for k, b in self.buckets.items())
 
 
 class LanePool:
@@ -78,15 +120,15 @@ class LanePool:
         self.lanes = lanes
         self._lock = asyncio.Lock()
 
-    async def acquire(self) -> Lane:
-        """Wait for the lane that becomes available first and reserve a slot on it."""
+    async def acquire(self, endpoint: str) -> Lane:
+        """Wait for the lane whose bucket for this endpoint frees up first, and reserve a slot."""
         while True:
             async with self._lock:
                 now = time.monotonic()
-                lane = min(self.lanes, key=lambda l: l.ready_at())
-                wait = lane.ready_at() - now
+                lane = min(self.lanes, key=lambda l: l.ready_at(endpoint))
+                wait = lane.ready_at(endpoint) - now
                 if wait <= 0:
-                    lane.take(now)
+                    lane.bucket(endpoint).take(now)
                     return lane
             await asyncio.sleep(min(wait, 1.0))
 

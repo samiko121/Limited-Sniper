@@ -213,7 +213,7 @@ class Commands:
             "Spent today": f"{self.e.history.spent_today():,} R$",
             "Errors / 429s": f"{st.errors} / {st.rate_limited}",
             "Last bought": st.last_bought or "-",
-            "Lanes": f"{sum(1 for l in self.e.lanes.lanes if l.status == 'ok')}/{len(self.e.lanes.lanes)} ok",
+            "Lanes": f"{sum(1 for l in self.e.lanes.lanes if l.status == 'ok')}/{len(self.e.lanes.lanes)} at full speed",
             "Version": __version__,
         }
 
@@ -232,6 +232,6 @@ class Commands:
 
     def lanes(self) -> list[str]:
         return [
-            f"{l.label:<28} {l.status:<8} {l.rps:5.1f} rps  {l.requests:>7} req  {l.rate_limits:>4} x429"
+            f"{l.label:<28} {l.status:<12} {l.describe_rates()}  {l.requests:>7} req  {l.rate_limits:>4} x429"
             for l in self.e.lanes.lanes
         ]

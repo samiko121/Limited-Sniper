@@ -69,7 +69,9 @@ class Engine:
             (s.watch_economy, EconomyWatcher),
         ):
             if enabled:
-                for i in range(s.workers_per_watcher):
+                # each lane adds capacity, so scale workers with the number of lanes
+                count = min(64, s.workers.get(cls.name, 1) * len(self.lanes.lanes))
+                for i in range(count):
                     spawn(cls(self, i).run(), f"{cls.name}-{i}")
         spawn(self._keepalive(), "keepalive")
         spawn(self._robux_refresher(), "robux")

@@ -31,10 +31,10 @@ DEFAULTS: dict[str, Any] = {
         "Marketplace_batch": True,
         "Catalog_batch": True,
         "Economy_single": True,
-        "Workers_per_watcher": 2,
-        "Marketplace_batch_size": 30,
+        "Marketplace_batch_size": 120,
         "Catalog_batch_size": 120,
-        "Requests_per_second_per_lane": 6,
+        "Rate_per_lane": {"Marketplace": 2, "Catalog": 0.5, "Economy": 15},
+        "Workers": {"Marketplace": 2, "Catalog": 1, "Economy": 8},
     },
     "Proxies": {
         "Enabled": False,
@@ -93,10 +93,10 @@ class Settings:
     watch_marketplace: bool
     watch_catalog: bool
     watch_economy: bool
-    workers_per_watcher: int
+    workers: dict[str, int]
     marketplace_batch_size: int
     catalog_batch_size: int
-    lane_rps: float
+    lane_rates: dict[str, float]
     proxies_enabled: bool
     proxies_file: str
     proxies_only: bool
@@ -213,6 +213,9 @@ def migrate_legacy(raw: dict) -> dict:
     if "StartUp_Message" in discord:
         discord["Startup_message"] = discord.pop("StartUp_Message")
     raw.pop("Global_Logs", None)  # the old hidden "global logs" no longer exist
+    watchers = raw.get("Watchers", {})
+    watchers.pop("Requests_per_second_per_lane", None)  # v2.0.0 -> per-endpoint Rate_per_lane
+    watchers.pop("Workers_per_watcher", None)
     return raw
 
 
@@ -251,9 +254,12 @@ def build_settings(raw: dict) -> Settings:
     if webhook_enabled and not WEBHOOK_RE.match(webhook_url):
         raise ConfigError("Webhook.Url must be a Discord webhook URL (https://discord.com/api/webhooks/...)")
 
-    rps = w["Requests_per_second_per_lane"]
-    if isinstance(rps, bool) or not isinstance(rps, (int, float)) or not 0.1 <= rps <= 100:
-        raise ConfigError("Watchers.Requests_per_second_per_lane must be between 0.1 and 100")
+    rates: dict[str, float] = {}
+    for k, v in w["Rate_per_lane"].items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0.1 <= v <= 100:
+            raise ConfigError(f"Watchers.Rate_per_lane.{k} must be between 0.1 and 100 requests per second")
+        rates[k.lower()] = float(v)
+    workers = {k.lower(): min(_int(v, f"Watchers.Workers.{k}", 1), 64) for k, v in w["Workers"].items()}
 
     return Settings(
         buy_cookie=str(c.get("Buy_cookie") or ""),
@@ -268,10 +274,10 @@ def build_settings(raw: dict) -> Settings:
         watch_marketplace=_bool(w["Marketplace_batch"], "Watchers.Marketplace_batch"),
         watch_catalog=_bool(w["Catalog_batch"], "Watchers.Catalog_batch"),
         watch_economy=_bool(w["Economy_single"], "Watchers.Economy_single"),
-        workers_per_watcher=min(_int(w["Workers_per_watcher"], "Watchers.Workers_per_watcher", 1), 32),
+        workers=workers,
         marketplace_batch_size=min(_int(w["Marketplace_batch_size"], "Watchers.Marketplace_batch_size", 1), 120),
         catalog_batch_size=min(_int(w["Catalog_batch_size"], "Watchers.Catalog_batch_size", 1), 120),
-        lane_rps=float(rps),
+        lane_rates=rates,
         proxies_enabled=_bool(p["Enabled"], "Proxies.Enabled"),
         proxies_file=str(p.get("File") or "proxies.txt"),
         proxies_only=_bool(p["Proxies_only"], "Proxies.Proxies_only"),

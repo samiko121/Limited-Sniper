@@ -55,13 +55,13 @@ Config files from v1.x are migrated automatically.
         "Keep_robux_reserve": 0           // never go below this balance
     },
     "Watchers": {
-        "Marketplace_batch": true,        // apis.roblox.com, includes listing ids (fastest path to a buy)
-        "Catalog_batch": true,            // catalog.roblox.com, 120 items per request
-        "Economy_single": true,           // economy.roblox.com, one item per request, most detail
-        "Workers_per_watcher": 2,
-        "Marketplace_batch_size": 30,
+        "Marketplace_batch": true,        // apis.roblox.com, 120 items per request, ~55 ms - the main watcher
+        "Catalog_batch": true,            // catalog.roblox.com, 120 items per request, but ~1 req/s allowed
+        "Economy_single": true,           // economy.roblox.com, one item per request, generous limit
+        "Marketplace_batch_size": 120,
         "Catalog_batch_size": 120,
-        "Requests_per_second_per_lane": 6 // starting speed; slows down automatically on 429
+        "Rate_per_lane": {"Marketplace": 2, "Catalog": 0.5, "Economy": 15}, // max requests/s per endpoint per lane
+        "Workers": {"Marketplace": 2, "Catalog": 1, "Economy": 8}         // parallel requests per lane
     },
     "Proxies": {
         "Enabled": false,

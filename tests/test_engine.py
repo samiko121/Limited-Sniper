@@ -15,7 +15,7 @@ from .fake_roblox import FakeRoblox
 
 def build(store, fake, tmp_path):
     buy = roblox.RobloxSession(COOKIE, transport=fake.transport(), name="buyer")
-    lanes = LanePool([Lane(roblox.RobloxSession(None, transport=fake.transport(), name="direct"), rps=50)])
+    lanes = LanePool([Lane(roblox.RobloxSession(None, transport=fake.transport(), name="direct"), rates=50)])
     return Engine(store, buy, lanes, History(tmp_path / "h.db"), Notifier(None, False))
 
 

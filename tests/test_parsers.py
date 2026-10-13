@@ -70,3 +70,11 @@ def test_offer_from_reseller_fills_seller():
     base = offers_from_economy(RED_CAP_ECONOMY)[0]
     o = offer_from_reseller(RESELLER_ROW, base)
     assert o.seller_id == 4637356944 and o.complete and o.price == 1400
+
+
+def test_economy_in_game_only_stock_is_skipped():
+    d = copy.deepcopy(RED_CAP_ECONOMY)
+    d.update(IsForSale=True, Remaining=5000, PriceInRobux=0, SaleLocation={"SaleLocationType": 6, "UniverseIds": [7554119808]})
+    assert [o.kind for o in offers_from_economy(d)] == [RESALE]  # resale is still fine
+    d["SaleLocation"] = {"SaleLocationType": 5, "UniverseIds": []}
+    assert STOCK in [o.kind for o in offers_from_economy(d)]
