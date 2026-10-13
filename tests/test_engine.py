@@ -141,3 +141,8 @@ def test_dashboard_renders(config_file, tmp_path):
     assert "Limited Sniper" in text and "BOUGHT Red Baseball Cap" in text
     asyncio.run(engine.lanes.aclose())
     asyncio.run(engine.buy_session.aclose())
+
+
+def test_marketplace_batches_never_exceed_30(config_file, tmp_path):
+    store, fake = config_file(Watchers={"Marketplace_batch_size": 120}), FakeRoblox()
+    assert store.settings.marketplace_batch_size == 30

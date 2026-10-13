@@ -44,6 +44,7 @@ class Engine:
         self.apply_config()
         self.buyer = Buyer(buy_session, lambda: self.settings, self.watchlist, self.stats, history, notifier)
         self.paused = False
+        self.marketplace_empty_warned = False
         self.stop_event = asyncio.Event()
         self.restart_requested = False
         self._tasks: list[asyncio.Task] = []

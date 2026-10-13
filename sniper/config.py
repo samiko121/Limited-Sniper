@@ -47,9 +47,9 @@ DEFAULTS: dict[str, Any] = {
         "Marketplace_batch": True,
         "Catalog_batch": True,
         "Economy_single": True,
-        "Marketplace_batch_size": 120,
+        "Marketplace_batch_size": 30,
         "Catalog_batch_size": 120,
-        "Rate_per_lane": {"Marketplace": 2, "Catalog": 0.5, "Economy": 15},
+        "Rate_per_lane": {"Marketplace": 1, "Catalog": 0.5, "Economy": 15},
         "Workers": {"Marketplace": 2, "Catalog": 1, "Economy": 8},
     },
     "Proxies": {
@@ -58,6 +58,7 @@ DEFAULTS: dict[str, Any] = {
         "Proxies_only": False,
         "Send_check_cookie": False,
         "Max_failures": 5,
+        "Relays": [],
         "Tor": {"Enabled": False, "Path": "", "Instances": 10, "Start_port": 9080},
     },
     "Webhook": {"Enabled": False, "Url": "", "Send_fails": False, "UserID_To_Ping": 0},
@@ -82,6 +83,8 @@ ITEM_URL_RE = re.compile(r"roblox\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?catalog/(\d+)
 class ConfigError(Exception):
     pass
 
+
+MARKETPLACE_MAX_BATCH = 30
 
 UGC, CLASSIC, AUTO = "ugc", "classic", "auto"  # AUTO = classic deal found via Rolimons values
 DEAL_CALCULATIONS = ("value_or_rap", "value", "rap")
@@ -125,6 +128,7 @@ class Settings:
     proxies_only: bool
     proxies_send_check_cookie: bool
     proxy_max_failures: int
+    relays: list[str]
     tor_enabled: bool
     tor_path: str
     tor_instances: int
@@ -314,7 +318,8 @@ def build_settings(raw: dict) -> Settings:
         watch_catalog=_bool(w["Catalog_batch"], "Watchers.Catalog_batch"),
         watch_economy=_bool(w["Economy_single"], "Watchers.Economy_single"),
         workers=workers,
-        marketplace_batch_size=min(_int(w["Marketplace_batch_size"], "Watchers.Marketplace_batch_size", 1), 120),
+        # Roblox returns *no rows at all* for more than 30 ids (verified Oct 2026)
+        marketplace_batch_size=min(_int(w["Marketplace_batch_size"], "Watchers.Marketplace_batch_size", 1), MARKETPLACE_MAX_BATCH),
         catalog_batch_size=min(_int(w["Catalog_batch_size"], "Watchers.Catalog_batch_size", 1), 120),
         lane_rates=rates,
         proxies_enabled=_bool(p["Enabled"], "Proxies.Enabled"),
@@ -322,6 +327,7 @@ def build_settings(raw: dict) -> Settings:
         proxies_only=_bool(p["Proxies_only"], "Proxies.Proxies_only"),
         proxies_send_check_cookie=_bool(p["Send_check_cookie"], "Proxies.Send_check_cookie"),
         proxy_max_failures=_int(p["Max_failures"], "Proxies.Max_failures", 1),
+        relays=_relays(p.get("Relays")),
         tor_enabled=_bool(t["Enabled"], "Proxies.Tor.Enabled"),
         tor_path=str(t.get("Path") or ""),
         tor_instances=min(_int(t["Instances"], "Proxies.Tor.Instances", 1), 200),
@@ -342,6 +348,14 @@ def build_settings(raw: dict) -> Settings:
         update_check=_bool(raw["Update_check"], "Update_check"),
         **_classic_settings(raw),
     )
+
+
+def _relays(value: Any) -> list[str]:
+    if not value:
+        return []
+    if not isinstance(value, list) or not all(isinstance(x, str) and x.startswith("https://") for x in value):
+        raise ConfigError("Proxies.Relays must be a list of https:// URLs")
+    return [x.strip() for x in value]
 
 
 def _classic_settings(raw: dict) -> dict:

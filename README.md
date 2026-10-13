@@ -77,12 +77,12 @@ Config files from v1.x are migrated automatically.
         "Keep_robux_reserve": 0           // never go below this balance
     },
     "Watchers": {
-        "Marketplace_batch": true,        // apis.roblox.com, 120 items per request, ~55 ms - the main watcher
+        "Marketplace_batch": true,        // apis.roblox.com, max 30 items per request (Roblox returns nothing above 30)
         "Catalog_batch": true,            // catalog.roblox.com, 120 items per request, but ~1 req/s allowed
         "Economy_single": true,           // economy.roblox.com, one item per request, generous limit
-        "Marketplace_batch_size": 120,
+        "Marketplace_batch_size": 30,
         "Catalog_batch_size": 120,
-        "Rate_per_lane": {"Marketplace": 2, "Catalog": 0.5, "Economy": 15}, // max requests/s per endpoint per lane
+        "Rate_per_lane": {"Marketplace": 1, "Catalog": 0.5, "Economy": 15}, // max requests/s per endpoint per lane
         "Workers": {"Marketplace": 2, "Catalog": 1, "Economy": 8}         // parallel requests per lane
     },
     "Proxies": {
@@ -91,6 +91,7 @@ Config files from v1.x are migrated automatically.
         "Proxies_only": false,            // false = also check from your own IP
         "Send_check_cookie": false,       // false = proxies check anonymously
         "Max_failures": 5,                // bench a proxy after this many errors in a row
+        "Relays": [],                     // https:// relay functions (x-relay-target / x-relay-path), anonymous checks only
         "Tor": {"Enabled": false, "Path": "", "Instances": 10, "Start_port": 9080}
     },
     "Webhook": {"Enabled": false, "Url": "", "Send_fails": false, "UserID_To_Ping": 0},
@@ -180,6 +181,10 @@ means more checks per second.
 * **Alt accounts:** add cookies to `Check_cookies`; each one becomes a lane.
 * **Proxies:** copy `proxies.example.txt` to `proxies.txt`, set `Proxies.Enabled`.
   HTTP and SOCKS5 proxies with or without auth are supported.
+* **Relays:** small forwarding functions you host (e.g. on Vercel or Deno Deploy) that take
+  `x-relay-target` + `x-relay-path` headers. Add their URLs to `Proxies.Relays`. Each one is
+  tested at startup and skipped if Roblox blocks it. Note: Roblox currently answers
+  `403 Request forbidden by administrative rules` to Vercel's IPs, so Vercel relays don't work.
 * **Tor:** download the official *Tor Expert Bundle* from
   <https://www.torproject.org/download/tor/>, set `Proxies.Tor.Path` to `tor.exe`
   and `Proxies.Tor.Enabled` + `Proxies.Enabled` to `true`. Tor runs as a normal

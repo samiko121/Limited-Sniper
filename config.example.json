@@ -39,9 +39,9 @@
         "Marketplace_batch": true,
         "Catalog_batch": true,
         "Economy_single": true,
-        "Marketplace_batch_size": 120,
+        "Marketplace_batch_size": 30,
         "Catalog_batch_size": 120,
-        "Rate_per_lane": {"Marketplace": 2, "Catalog": 0.5, "Economy": 15},
+        "Rate_per_lane": {"Marketplace": 1, "Catalog": 0.5, "Economy": 15},
         "Workers": {"Marketplace": 2, "Catalog": 1, "Economy": 8}
     },
     "Proxies": {
@@ -50,6 +50,7 @@
         "Proxies_only": false,
         "Send_check_cookie": false,
         "Max_failures": 5,
+        "Relays": [],
         "Tor": {
             "Enabled": false,
             "Path": "",

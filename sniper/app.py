@@ -20,6 +20,7 @@ from .config import ConfigError, ConfigStore, Settings
 from .engine import Engine
 from .history import History
 from .lanes import Lane, LanePool, load_proxies, proxy_label
+from .relay import RelayTransport, relay_label
 from .notify import Notifier
 from .rolimons import RolimonsValues
 from .tor import TorProcess
@@ -48,7 +49,27 @@ def setup_logging(dashboard: bool, debug: bool) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
-def build_lanes(s: Settings, check_cookies: list[str], buy_cookie: str, proxies: list[str]) -> LanePool:
+async def working_relays(urls: list[str]) -> list[str]:
+    """Test each relay with one public Roblox request; skip the ones Roblox blocks."""
+    ok = []
+    for url in urls:
+        s = roblox.RobloxSession(None, transport=RelayTransport(url))
+        try:
+            await roblox.economy_details(s, 1028606)
+            ok.append(url)
+            log.info("Relay %s works", relay_label(url))
+        except roblox.RobloxHTTPError as e:
+            hint = " (Roblox blocks this host's IPs)" if e.status == 403 else ""
+            log.warning("Relay %s skipped: HTTP %s%s", relay_label(url), e.status, hint)
+        except httpx.HTTPError as e:
+            log.warning("Relay %s skipped: %s", relay_label(url), type(e).__name__)
+        finally:
+            await s.aclose()
+    return ok
+
+
+def build_lanes(s: Settings, check_cookies: list[str], buy_cookie: str, proxies: list[str],
+                relays: list[str] | None = None) -> LanePool:
     lanes: list[Lane] = []
     cookies = list(check_cookies) or ([buy_cookie] if s.use_buy_cookie_for_checks else [])
     if not (s.proxies_enabled and s.proxies_only):
@@ -60,6 +81,9 @@ def build_lanes(s: Settings, check_cookies: list[str], buy_cookie: str, proxies:
     for i, url in enumerate(proxies):
         ck = cookies[i % len(cookies)] if (cookies and s.proxies_send_check_cookie) else None
         session = roblox.RobloxSession(ck, proxy=url, http2=False, name=f"proxy {proxy_label(url)}")
+        lanes.append(Lane(session, s.lane_rates, s.proxy_max_failures))
+    for url in relays or []:  # always anonymous
+        session = roblox.RobloxSession(None, transport=RelayTransport(url), name=relay_label(url))
         lanes.append(Lane(session, s.lane_rates, s.proxy_max_failures))
     return LanePool(lanes)
 
@@ -112,14 +136,15 @@ async def run(config_path: Path, args: argparse.Namespace) -> bool:
             pfile = config_path.parent / pfile
         if pfile.exists():
             proxies += load_proxies(pfile)
-        elif not s.tor_enabled:
+        elif not (s.tor_enabled or s.relays):
             raise ConfigError(f"Proxies are enabled but {pfile} does not exist")
-        if not proxies:
+        if not proxies and not s.relays:
             raise ConfigError("Proxies are enabled but no proxies were loaded")
         log.info("Loaded %d proxies", len(proxies))
 
+    relays = await working_relays(s.relays) if s.proxies_enabled and s.relays else []
     buy_session = roblox.RobloxSession(buy_cookie, name="buyer")
-    lanes = build_lanes(s, check_cookies, buy_cookie, proxies)
+    lanes = build_lanes(s, check_cookies, buy_cookie, proxies, relays)
     history = History(ROOT / "data" / "history.db")
     notifier = Notifier(s.webhook_url if s.webhook_enabled else None, s.webhook_send_fails, s.webhook_ping_user)
     rolimons = RolimonsValues(ROOT / "data" / "rolimons.json")

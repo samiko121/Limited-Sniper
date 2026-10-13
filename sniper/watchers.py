@@ -102,8 +102,11 @@ class MarketplaceWatcher(Watcher):
         ids = wl.next_batch(self.cursor, e.settings.marketplace_batch_size, lambda i: wl.collectible_id(i) is not None)
         if not ids:
             return 0
-        cids = [wl.collectible_id(i) for i in ids]
-        rows = await roblox.marketplace_details(lane.session, [c for c in cids if c])
+        cids = [c for c in (wl.collectible_id(i) for i in ids) if c]
+        rows = await roblox.marketplace_details(lane.session, cids)
+        if cids and not rows and not self.engine.marketplace_empty_warned:
+            self.engine.marketplace_empty_warned = True
+            e.stats.event(f"Marketplace returned 0 rows for {len(cids)} ids - Roblox may have changed the batch limit", logging.WARNING)
         for d in rows:
             asset_id = d.get("itemTargetId")
             if asset_id is None:
@@ -111,7 +114,7 @@ class MarketplaceWatcher(Watcher):
             wl.learn(int(asset_id), meta_from_marketplace(d))
             for offer in offers_from_marketplace(d):
                 e.consider(offer)
-        return len(ids)
+        return len(rows)  # count what Roblox actually answered, not what we asked for
 
 
 class CatalogWatcher(Watcher):
@@ -133,7 +136,7 @@ class CatalogWatcher(Watcher):
             product_id = wl.meta_for(asset_id).collectible_product_id
             for offer in offers_from_catalog(d, product_id):
                 e.consider(offer)
-        return len(ids)
+        return len(rows)
 
 
 class EconomyWatcher(Watcher):
@@ -169,11 +172,12 @@ async def resolve_loop(engine: "Engine") -> None:
                 if d.get("id") is not None:
                     seen.add(int(d["id"]))
                     wl.learn(int(d["id"]), meta_from_catalog(d), engine.stats)
-            for asset_id in missing[:120]:
-                if asset_id not in seen:  # deleted / not an asset
-                    wl.meta_for(asset_id).not_collectible = True
-                    engine.stats.event(f"Item {asset_id} was not found in the catalog", logging.WARNING)
             lane.ok("catalog", 0)
+            # The catalog silently leaves some ids out. Double-check those one by
+            # one on the economy endpoint before deciding they can't be bought.
+            for asset_id in missing[:120]:
+                if asset_id not in seen:
+                    await _verify_single(engine, asset_id)
         except roblox.RateLimited:
             lane.rate_limited("catalog")
             engine.stats.rate_limited += 1
@@ -181,3 +185,37 @@ async def resolve_loop(engine: "Engine") -> None:
             lane.failed()
             log.debug("resolver: %s", err)
             await asyncio.sleep(2)
+
+
+async def _verify_single(engine: "Engine", asset_id: int) -> None:
+    wl = engine.watchlist
+    for _ in range(3):
+        lane = await engine.lanes.acquire("economy")
+        try:
+            d = await roblox.economy_details(lane.session, asset_id)
+        except roblox.RateLimited:
+            lane.rate_limited("economy")
+            continue
+        except roblox.RobloxHTTPError as err:
+            if err.status in (400, 404):
+                d = {}
+            else:
+                lane.failed()
+                continue
+        except httpx.HTTPError:
+            lane.failed()
+            continue
+        lane.ok("economy", 0)
+        meta = meta_from_economy(d) if d else None
+        if meta and meta.collectible_item_id:
+            wl.learn(asset_id, meta, engine.stats)
+        else:
+            m = wl.meta_for(asset_id)
+            m.not_collectible = True
+            if d.get("Name"):
+                m.name = d["Name"]
+            engine.stats.event(
+                f"Item {asset_id} ({m.name or '?'}) can't be bought on Roblox (removed from the catalog / not a collectible) - skipped",
+                logging.WARNING,
+            )
+        return

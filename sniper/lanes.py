@@ -22,11 +22,11 @@ log = logging.getLogger(__name__)
 
 MIN_RPS = 0.2
 
-# Measured against live Roblox (Oct 2026, one anonymous IP, 60 s runs):
-# marketplace batch has a per-minute budget of roughly 110-120 requests (pushing
-# harder gets *fewer* through), catalog batch ~0.5 req/s, economy 15 req/s with
-# no 429s at all. Marketplace requests carry 120 items each.
-DEFAULT_RATES = {"marketplace": 2.0, "catalog": 0.5, "economy": 15.0}
+# Roblox's own x-ratelimit headers (Oct 2026, per IP): marketplace-items details
+# 60 requests / 60 s (max 30 ids each), economy asset details 1000 / 60 s,
+# resellers 50 / 60 s. Catalog batch measured at ~0.5 req/s. Going over the
+# marketplace limit gets *every* request rejected for a while, so stay under it.
+DEFAULT_RATES = {"marketplace": 1.0, "catalog": 0.5, "economy": 15.0}
 
 
 class Bucket:

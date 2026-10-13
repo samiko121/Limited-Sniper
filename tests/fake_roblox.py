@@ -51,8 +51,12 @@ class FakeRoblox:
             return httpx.Response(200, json={"data": [r for r in rows if r]})
         if path == "/marketplace-items/v1/items/details":
             ids = json.loads(request.content).get("itemIds", [])
+            if len(ids) > 30:  # real Roblox behaviour: no rows at all above 30 ids
+                return httpx.Response(200, json=[])
             return httpx.Response(200, json=[self.marketplace] if self.marketplace["collectibleItemId"] in ids else [])
         if path.startswith("/v2/assets/"):
+            if path.split("/")[3] != str(self.economy["AssetId"]):
+                return httpx.Response(400, json={"errors": [{"message": "The asset id is invalid."}]})
             return httpx.Response(200, json=self.economy)
         if path.endswith("/resellers"):
             return httpx.Response(200, json={"data": [self.reseller] if self.reseller else []})

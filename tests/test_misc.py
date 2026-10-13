@@ -119,3 +119,29 @@ def test_watchlist_round_robin_and_focus():
     wl.focus = WatchItem(99, 7)
     assert wl.next_batch("a", 5) == [99]
     assert wl.get(1) is None and wl.get(99).max_price == 7
+
+
+def test_relay_transport_rewrites_and_strips_cookies():
+    import httpx
+    from sniper.relay import RelayTransport
+    seen = {}
+
+    class Inner(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            seen["url"] = str(request.url)
+            seen["headers"] = dict(request.headers)
+            return httpx.Response(200, json={"ok": True})
+
+    t = RelayTransport("https://relay.example.app")
+    t._inner = Inner()
+
+    async def go():
+        async with httpx.AsyncClient(transport=t) as c:
+            return await c.get("https://economy.roblox.com/v2/assets/5/details?x=1", headers={"Cookie": ".ROBLOSECURITY=secret"})
+
+    r = asyncio.run(go())
+    assert r.json() == {"ok": True}
+    assert seen["url"] == "https://relay.example.app/"
+    assert seen["headers"]["x-relay-target"] == "https://economy.roblox.com"
+    assert seen["headers"]["x-relay-path"] == "/v2/assets/5/details?x=1"
+    assert "cookie" not in seen["headers"]
