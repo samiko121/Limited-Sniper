@@ -128,3 +128,22 @@ def test_effective_limit(config_file):
     assert effective_limit(WatchItem(1, 1, 5), s, 2) == 2
     s2 = config_file().settings
     assert effective_limit(WatchItem(1, 1), s2, None) is None
+
+
+def test_dry_run_reports_a_listing_once(config_file, tmp_path):
+    store, fake = config_file(Safety={"Dry_run": True}), FakeRoblox()
+
+    async def go():
+        buyer, history = make_buyer(store, fake, tmp_path)
+        for _ in range(2):
+            buyer.consider(red_cap_resale(), WatchItem(1028606, 1500))
+            await asyncio.sleep(0)
+            await buyer.drain()
+        rows = history.recent(20)
+        left = max(buyer.cooldown.values()) - time.monotonic()
+        await buyer.session.aclose()
+        return rows, left
+
+    rows, left = asyncio.run(go())
+    assert [r.status for r in rows] == ["dry_run"]
+    assert left > 300  # not re-reported every minute while it stays listed

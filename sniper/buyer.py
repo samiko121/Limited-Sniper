@@ -194,7 +194,9 @@ class Buyer:
                 self.stats.event(f"[DRY RUN] would buy {offer.name} ({offer.kind}) for {offer.price:,} R${deal_text(offer, item)}", logging.WARNING)
                 self.history.add(Purchase(time.time(), offer.asset_id, offer.name, offer.price, offer.kind, "dry_run", offer.serial, None))
                 self.notifier.dry_run(offer)
-                return 60.0
+                # A listing that would have been bought stays listed in dry run;
+                # report it once, like a real buy, instead of every minute.
+                return 600.0 if offer.kind == RESALE else 60.0
             return await self._buy(offer, item)
         finally:
             async with self._lock:
